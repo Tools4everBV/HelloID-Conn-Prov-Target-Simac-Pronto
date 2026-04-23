@@ -46,19 +46,21 @@ _HelloID-Conn-Prov-Target-Simac-Pronto_ is a _target_ connector. _Simac-Pronto_ 
 
 The following features are available:
 
-| Feature                                   | Supported | Actions                                 | Remarks            |
-| ----------------------------------------- | --------- | --------------------------------------- | ------------------ |
-| **Account Lifecycle**                     | ✅         | Create, Update, Enable, Disable, Delete |                    |
-| **Permissions**                           | ✅         | Retrieve, Grant, Revoke                 | Identifications and PersonsGroups |
-| **Resources**                             | ❌         | -                                       |                    |
-| **Entitlement Import: Accounts**          | ✅         | -                                       |                    |
-| **Entitlement Import: Permissions**       | ✅         | Identifications and PersonsGroups                                       |                    |
-| **Governance Reconciliation Resolutions** | ✅         | -                                       |                    |
+| Feature                                   | Supported | Actions                                 | Remarks                           |
+| ----------------------------------------- | --------- | --------------------------------------- | --------------------------------- |
+| **Account Lifecycle**                     | ✅        | Create, Update, Enable, Disable, Delete |                                   |
+| **Permissions**                           | ✅        | Retrieve, Grant, Revoke                 | Identifications and PersonsGroups |
+| **Resources**                             | ❌        | -                                       |                                   |
+| **Entitlement Import: Accounts**          | ✅        | -                                       |                                   |
+| **Entitlement Import: Permissions**       | ✅        | Identifications and PersonsGroups       |                                   |
+| **Governance Reconciliation Resolutions** | ✅        | -                                       |                                   |
 
 ## Getting started
 
 ### HelloID Icon URL
+
 URL of the icon used for the HelloID Provisioning target system.
+
 ```
 https://raw.githubusercontent.com/Tools4everBV/HelloID-Conn-Prov-Target-Simac-Pronto/refs/heads/main/Icon.png
 ```
@@ -66,12 +68,15 @@ https://raw.githubusercontent.com/Tools4everBV/HelloID-Conn-Prov-Target-Simac-Pr
 ### Requirements
 
 #### Concurrent Sessions
+
 - **Sequential Operations**: The grant and revoke permissions script use the Patch operation on a person. This means that concurrent actions should be set to 1 to ensure all permissions are correctly set.
 
 #### Identification Numbers
+
 - The connector is created with the assumption that the identification numbers (pass numbers) are stored in HR and therefore in the HelloID Person object. These numbers are used to grant the identification permissions in Simac Pronto. [Remarks - Identification permissions](#identifications-permissions)
 
 #### ExternalId property
+
 - The `ExternalId` in Simac-Pronto is used to correlate the HelloID Person to the Simac-Pronto account. Therefore, this property must be populated with the internal ID of the person in Simac-Pronto. [Remarks - ID field can be empty](#id-field-can-be-empty)
 
 ### Connection settings
@@ -83,6 +88,9 @@ The following settings are required to connect to the API.
 | UserName | The UserName to connect to the API | Yes       |
 | Password | The Password to connect to the API | Yes       |
 | BaseUrl  | The URL to the API                 | Yes       |
+
+> [!WARNING]
+> Per action an Authentication Token is needed. Pronto allows a maximum of 10 token requests per minute. Therefore processing of great number of entitlement actions can take a lot of time.
 
 ### Correlation configuration
 
@@ -106,46 +114,59 @@ The field mapping can be imported by using the _fieldMapping.json_ file.
 The account reference is populated with the `Id` property from _Simac-Pronto_
 
 ## Remarks
+
 ### ID field can be empty
+
 The `ID` field of a `Person` and the `PersonGroup` can be empty. In the UI, there is a field called externalID. The value of the externalID is returned in the ID field in the API. However, the externalID cannot be retrieved via the API. Additionally, the internal ID itself is not available.
 
 > Requirement: To be able to correlate the existing Simac Pronto persons or groups, the `externalID` must be populated by the customer/vendor with the "internal" ID.
 
 ### Enable/Disable accounts
+
 The enable and disable actions have some additional considerations that you need to be aware of when implementing the business rules. When an account is disabled or enabled, the granted permissions are affected: disabling and enabling an account revokes the permissions. This behavior from the API is not desirable; therefore, the `enable` and `disable` scripts always include all current permissions in the API request.
 
 ### Disabled accounts
+
 - **Not visible in the UI**: Disabled accounts are not visible in the UI, likely because they are not linked to a person group.
 
 ### Permissions
 
 #### Identifications permissions
+
 The identification permissions of a Simac account are basically the physical passes a person has. The connector is created assuming that the pass numbers of a person are saved in HR and therefore stored in the HelloID Person. These numbers can therefore be used directly to grant the identification permissions in Simac Pronto, without the need for additional lookups.
 
 - **Dynamic permissions**: The identification permissions use dynamic permissions to grant and revoke the passes.
+- **Identifications without Id**: Updating identifaction permissions is performed by a PATCH method. Therefore the current identifactions are fetched first. It may occur in Pronto that an identifacation isn't related to an id anymore. Functional this shouldn't occur, but it's technical possible. When an identifation has no id in Pronto an error will be returned.
+  _Error: The Identifications.2.Id field is required._. This can be resolved by deleting the identification in Pronto.
+
 - **One Identifications permission**: The connector is now built to grant one identification permission per person. To ensure this, we only consider the primary contract when determining which permission should be granted. Granting more than one permission is possible, but this requires changes to the connector.
 
 - **SimacProntoPassNumber**: The `Identifications` dynamic permissions are currently based on `Custom.SimacProntoPassNumber`:
- ```Powershell
+
+```Powershell
 # Script Mapping lookup values
 $identificationId  = $personContext.Person.Custom.SimacProntoPassNumber # Mandatory
- ```
- - **No update permission**: Because this connector is currently built to grant only one identification permission, it is not necessary to update the identification (sub)permission itself. If the property that correlates to the identification changes, the connector uses a grant-and-revoke approach to correctly update the permission. The update operation can still be triggered, so a “no change” audit log has been implemented.
+```
 
- - **Configure Import Script**: Must be the same as the values used in retrieve /static permissions.
- ```Powershell
-  # Configure, must be the same as the values used in retrieve permissions
-  $permissionReference = 'Identifications'
-  $permissionDisplayName = 'Identifications'
+- **No update permission**: Because this connector is currently built to grant only one identification permission, it is not necessary to update the identification (sub)permission itself. If the property that correlates to the identification changes, the connector uses a grant-and-revoke approach to correctly update the permission. The update operation can still be triggered, so a “no change” audit log has been implemented.
+
+- **Configure Import Script**: Must be the same as the values used in retrieve /static permissions.
+
+```Powershell
+ # Configure, must be the same as the values used in retrieve permissions
+ $permissionReference = 'Identifications'
+ $permissionDisplayName = 'Identifications'
 ```
 
 ### Reboarding
+
 The delete action of the connector does not perform a hard delete of the person in Simac Pronto. Instead, it disables the person. Normally, this could cause uniqueness issues—for example, with email addresses—when reboarding a person. However, Simac Pronto has no uniqueness constraints on these fields, so reboarding itself is not an issue. The possible drawback is that multiple accounts may exist in Pronto with the same email address.
 
 ### Under construction
-#### PreferedFullname
-- **PreferedFullname**: There is a typo in the API property `PreferedFullname`. The connector uses this property directly, and therefore the same typo exists in the field mapping.
 
+#### PreferedFullname
+
+- **PreferedFullname**: There is a typo in the API property `PreferedFullname`. The connector uses this property directly, and therefore the same typo exists in the field mapping.
 
 ## Development resources
 

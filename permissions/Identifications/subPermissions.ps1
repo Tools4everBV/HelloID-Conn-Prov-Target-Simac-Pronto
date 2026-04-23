@@ -7,7 +7,8 @@
 [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor [System.Net.SecurityProtocolType]::Tls12
 
 # Script Mapping lookup values
-$identificationId = $personContext.Person.Custom.SimacProntoPassNumber # Mandatory
+$identificationId = $personContext.Person.PrimaryContract.Custom.ProntoTag # Mandatory
+
 #region functions
 function Resolve-Simac-ProntoError {
     [CmdletBinding()]
@@ -25,7 +26,8 @@ function Resolve-Simac-ProntoError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -36,11 +38,39 @@ function Resolve-Simac-ProntoError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
             Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
+    }
+}
+
+function Get-AccessToken {
+    [CmdletBinding()]
+    param ()
+    try {
+        $splatTokenParams = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
+            Method  = 'POST'
+            Headers = @{
+                'accept' = 'application/json'
+            }
+            Body    = @{
+                username = $actionContext.Configuration.UserName
+                password = $actionContext.Configuration.Password
+            }
+        }
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
+
+        # Wait 6 seconds in order to prevent error Too Many Requests
+        Start-Sleep -Seconds  6
+
+        Write-Output $token.token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
@@ -52,19 +82,7 @@ try {
         throw 'The account reference could not be found'
     }
 
-    # get auth token and set header
-    $splatTokenParams = @{
-        Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
-        Method  = 'POST'
-        Headers = @{
-            'accept' = 'application/json'
-        }
-        Body    = @{
-            username = $actionContext.Configuration.UserName
-            password = $actionContext.Configuration.Password
-        }
-    }
-    $accessToken = (Invoke-RestMethod @splatTokenParams).token
+    $accessToken = Get-AccessToken
 
     $headers = @{
         Authorization  = "Bearer $($accessToken)"
@@ -80,10 +98,12 @@ try {
     }
     try {
         $correlatedAccount = (Invoke-RestMethod @splatGetUserParams) | Select-Object -First 1
-    } catch {
+    }
+    catch {
         if ($_.Exception.Response.StatusCode -eq 404) {
             $correlatedAccount = $null
-        } else {
+        }
+        else {
             throw $_
         }
     }
@@ -130,7 +150,8 @@ try {
 
             if (-not($actionContext.DryRun -eq $true)) {
                 $null = Invoke-RestMethod @splatGrantParams
-            }
+                
+            }            
 
             $outputContext.AuditLogs.Add([PSCustomObject]@{
                     Action  = 'GrantPermission'
@@ -163,7 +184,8 @@ try {
                     Message = "Revoked access to permission $($permission.Value)"
                     IsError = $false
                 })
-        } else {
+        }
+        else {
             $newCurrentPermissions[$permission.Name] = $permission.Value
         }
     }
@@ -179,7 +201,8 @@ try {
         }
     }
     $outputContext.Success = $true
-} catch {
+}
+catch {
     $outputContext.Success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
@@ -187,7 +210,8 @@ try {
         $errorObj = Resolve-Simac-ProntoError -ErrorObject $ex
         $auditMessage = "Could not manage Simac-Pronto permissions. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditMessage = "Could not manage Simac-Pronto permissions. Error: $($_.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }

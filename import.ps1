@@ -23,7 +23,8 @@ function Resolve-Simac-ProntoError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -34,11 +35,39 @@ function Resolve-Simac-ProntoError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
             Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
+    }
+}
+
+function Get-AccessToken {
+    [CmdletBinding()]
+    param ()
+    try {
+        $splatTokenParams = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
+            Method  = 'POST'
+            Headers = @{
+                'accept' = 'application/json'
+            }
+            Body    = @{
+                username = $actionContext.Configuration.UserName
+                password = $actionContext.Configuration.Password
+            }
+        }
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
+
+        # Wait 6 seconds in order to prevent error Too Many Requests
+        Start-Sleep -Seconds  6
+
+        Write-Output $token.token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
@@ -46,19 +75,7 @@ function Resolve-Simac-ProntoError {
 try {
     Write-Information 'Starting Simac-Pronto account entitlement import'
 
-    # get auth token and set header
-    $splatTokenParams = @{
-        Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
-        Method  = 'POST'
-        Headers = @{
-            'accept' = 'application/json'
-        }
-        Body    = @{
-            username = $actionContext.Configuration.UserName
-            password = $actionContext.Configuration.Password
-        }
-    }
-    $accessToken = (Invoke-RestMethod @splatTokenParams).token
+    $accessToken = Get-AccessToken
 
     $headers = @{
         Authorization  = "Bearer $($accessToken)"
@@ -128,14 +145,16 @@ try {
     } while ($itemsOnPage -eq $response.meta.per_page)
 
     Write-Information 'Simac-Pronto account entitlement import completed'
-} catch {
+}
+catch {
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-Simac-ProntoError -ErrorObject $ex
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
         Write-Error "Could not import Simac-Pronto account entitlements. Error: $($errorObj.FriendlyMessage)"
-    } else {
+    }
+    else {
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
         Write-Error "Could not import Simac-Pronto account entitlements. Error: $($ex.Exception.Message)"
     }

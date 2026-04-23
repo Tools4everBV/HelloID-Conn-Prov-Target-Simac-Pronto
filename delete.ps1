@@ -23,7 +23,8 @@ function Resolve-Simac-ProntoError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -34,11 +35,39 @@ function Resolve-Simac-ProntoError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
             Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
+    }
+}
+
+function Get-AccessToken {
+    [CmdletBinding()]
+    param ()
+    try {
+        $splatTokenParams = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
+            Method  = 'POST'
+            Headers = @{
+                'accept' = 'application/json'
+            }
+            Body    = @{
+                username = $actionContext.Configuration.UserName
+                password = $actionContext.Configuration.Password
+            }
+        }
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
+
+        # Wait 6 seconds in order to prevent error Too Many Requests
+        Start-Sleep -Seconds  6
+
+        Write-Output $token.token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
@@ -49,19 +78,7 @@ try {
         throw 'The account reference could not be found'
     }
 
-    # get auth token and set header
-    $splatTokenParams = @{
-        Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
-        Method  = 'POST'
-        Headers = @{
-            'accept' = 'application/json'
-        }
-        Body    = @{
-            username = $actionContext.Configuration.UserName
-            password = $actionContext.Configuration.Password
-        }
-    }
-    $accessToken = (Invoke-RestMethod @splatTokenParams).token
+    $accessToken = Get-AccessToken
 
     $headers = @{
         Authorization  = "Bearer $($accessToken)"
@@ -77,17 +94,20 @@ try {
     }
     try {
         $correlatedAccount = (Invoke-RestMethod @splatGetUserParams) | Select-Object -First 1
-    } catch {
+    }
+    catch {
         if ($_.Exception.Response.StatusCode -eq 404) {
             $correlatedAccount = $null
-        } else {
+        }
+        else {
             throw $_
         }
     }
 
     if ($null -ne $correlatedAccount) {
         $action = 'DeleteAccount'
-    } else {
+    }
+    else {
         $action = 'NotFound'
     }
 
@@ -97,7 +117,8 @@ try {
             if ($null -ne $correlatedAccount.UntilTime -and $correlatedAccount.UntilTime -lt (Get-Date) ) {
                 Write-Information "Simac-Pronto account: [$($actionContext.References.Account)] is already deactivated."
 
-            } else {
+            }
+            else {
                 $splatDeleteParams = @{
                     Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/persons/$($actionContext.References.Account)"
                     Method  = 'DELETE'
@@ -109,7 +130,9 @@ try {
                     Write-Information "Deleting Simac-Pronto account with accountReference: [$($actionContext.References.Account)]"
 
                     $null = Invoke-RestMethod @splatDeleteParams
-                } else {
+
+                }
+                else {
                     Write-Information "[DryRun] Delete Simac-Pronto account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
                 }
             }
@@ -132,7 +155,8 @@ try {
             break
         }
     }
-} catch {
+}
+catch {
     $outputContext.success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
@@ -140,7 +164,8 @@ try {
         $errorObj = Resolve-Simac-ProntoError -ErrorObject $ex
         $auditLogMessage = "Could not delete Simac-Pronto account. Error: $($errorObj.FriendlyMessage). Action initiated by: [$($actionContext.Origin)]"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditLogMessage = "Could not delete Simac-Pronto account. Error: $($_.Exception.Message). Action initiated by: [$($actionContext.Origin)]"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }

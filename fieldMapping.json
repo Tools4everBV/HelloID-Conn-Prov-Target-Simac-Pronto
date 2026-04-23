@@ -35,74 +35,6 @@
       ]
     },
     {
-      "Name": "PreferedFullname",
-      "Description": "",
-      "Type": "Text",
-      "MappingActions": [
-        {
-          "MapForActions": [
-            "Create",
-            "Update"
-          ],
-          "MappingMode": "Field",
-          "Value": "\"Person.DisplayName\"",
-          "UsedInNotifications": false,
-          "StoreInAccountData": false
-        }
-      ]
-    },
-    {
-      "Name": "Email",
-      "Description": "",
-      "Type": "Text",
-      "MappingActions": [
-        {
-          "MapForActions": [
-            "Create",
-            "Update"
-          ],
-          "MappingMode": "Complex",
-          "Value": "\"function getEmail() {\\n    let mail = '';\\n\\n    if (typeof Person.Accounts.AzureAD.mail !== 'undefined' && Person.Accounts.AzureAD.mail) {\\n        mail = Person.Accounts.AzureAD.mail;\\n    }\\n\\n    return mail;\\n}\\n\\ngetEmail()\"",
-          "UsedInNotifications": false,
-          "StoreInAccountData": false
-        }
-      ]
-    },
-    {
-      "Name": "Company",
-      "Description": "",
-      "Type": "Text",
-      "MappingActions": [
-        {
-          "MapForActions": [
-            "Create",
-            "Update"
-          ],
-          "MappingMode": "Fixed",
-          "Value": "\"Simac Pronto\"",
-          "UsedInNotifications": false,
-          "StoreInAccountData": false
-        }
-      ]
-    },
-    {
-      "Name": "Infix",
-      "Description": "",
-      "Type": "Text",
-      "MappingActions": [
-        {
-          "MapForActions": [
-            "Create",
-            "Update"
-          ],
-          "MappingMode": "Field",
-          "Value": "\"Person.Name.FamilyNamePrefix\"",
-          "UsedInNotifications": false,
-          "StoreInAccountData": false
-        }
-      ]
-    },
-    {
       "Name": "Initials",
       "Description": "",
       "Type": "Text",
@@ -120,7 +52,24 @@
       ]
     },
     {
-      "Name": "LastName",
+      "Name": "Email",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"function getEmail() {\\n    let mail = '';\\n\\n    if (typeof Person.Accounts.MicrosoftActiveDirectory.mail !== 'undefined' && Person.Accounts.MicrosoftActiveDirectory.mail) {\\n        mail = Person.Accounts.MicrosoftActiveDirectory.mail;\\n    }\\n\\n    return mail;\\n}\\n\\ngetEmail()\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "Company",
       "Description": "",
       "Type": "Text",
       "MappingActions": [
@@ -130,7 +79,75 @@
             "Update"
           ],
           "MappingMode": "Field",
-          "Value": "\"Person.Name.FamilyName\"",
+          "Value": "\"Person.PrimaryContract.Employer.Name\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "ProntoTag",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Field",
+          "Value": "\"Person.PrimaryContract.Custom.ProntoTag\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": true
+        }
+      ]
+    },
+    {
+      "Name": "Infix",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"// Mapping logic to generate the Infix according to the following convention.\\r\\n// B\\tvan den\\r\\n// BP\\tvan den\\r\\n// P\\tde\\r\\n// PB   de\\r\\nfunction generateInfix() {\\r\\n    let middleName = ''\\r\\n    let convention = Person.Name.Convention;\\r\\n\\r\\n    let surName = '';\\r\\n    switch (convention) {        \\r\\n        case \\\"PB\\\":\\r\\n        case \\\"P\\\":\\r\\n            if (typeof Person.Name.FamilyNamePartnerPrefix !== 'undefined' && Person.Name.FamilyNamePartnerPrefix) { middleName = Person.Name.FamilyNamePartnerPrefix; }                       \\r\\n            break;       \\r\\n        case \\\"BP\\\":\\r\\n        case \\\"B\\\":\\r\\n        default:\\r\\n            if (typeof Person.Name.FamilyNamePrefix !== 'undefined' && Person.Name.FamilyNamePrefix) { middleName = Person.Name.FamilyNamePrefix; }                                   \\r\\n            break;\\r\\n    }\\r\\n    // Trim spaces at start and end\\r\\n    middleName = middleName.trim();\\r\\n\\r\\n    return middleName;\\r\\n}\\r\\n\\r\\ngenerateInfix();\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "LastName",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"// Mapping logic to generate the Surname according to the following convention.\\r\\n// B\\tBoele\\r\\n// BP\\tBoele – de Vries\\r\\n// P\\tVries\\r\\n// PB   Vries – van den Boele\\r\\nfunction generateSurname() {\\r\\n    let lastName = Person.Name.FamilyName;\\r\\n    let lastNamePartner = Person.Name.FamilyNamePartner;\\r\\n    let convention = Person.Name.Convention;\\r\\n\\r\\n    let surName = '';\\r\\n    switch (convention) {        \\r\\n        case \\\"P\\\":\\r\\n        case \\\"PB\\\":\\r\\n            surName = surName + lastNamePartner;\\r\\n            break;\\r\\n        case \\\"B\\\":\\r\\n        case \\\"BP\\\":\\r\\n        default:\\r\\n            surName = surName + lastName;\\r\\n            break;\\r\\n    }\\r\\n    // Trim spaces at start and end\\r\\n    surName = surName.trim();\\r\\n\\r\\n    // Shorten string to maxAttributeLength \\r\\n    const maxAttributeLength = 64;\\r\\n    surName = surName.substring(0, maxAttributeLength);\\r\\n\\r\\n    return surName;\\r\\n}\\r\\n\\r\\ngenerateSurname();\"",
+          "UsedInNotifications": false,
+          "StoreInAccountData": false
+        }
+      ]
+    },
+    {
+      "Name": "PreferedFullname",
+      "Description": "",
+      "Type": "Text",
+      "MappingActions": [
+        {
+          "MapForActions": [
+            "Create",
+            "Update"
+          ],
+          "MappingMode": "Complex",
+          "Value": "\"// Mapping logic to generate the DisplayName according to the following convention.\\r\\n// B\\tBoele, Janine van den (ExternalID)\\r\\n// BP\\tBoele, Janine van den (ExternalID)\\r\\n// P\\tVries, Janine de (ExternalID)\\r\\n// PB   Vries, Janine de (ExternalID)\\r\\n\\r\\nfunction generateDisplayName() {\\r\\n    let nickName = Person.Name.NickName;\\r\\n    let middleName = Person.Name.FamilyNamePrefix;\\r\\n    let lastName = Person.Name.FamilyName;\\r\\n    let middleNamePartner = Person.Name.FamilyNamePartnerPrefix;\\r\\n    let lastNamePartner = Person.Name.FamilyNamePartner;\\r\\n    let convention = Person.Name.Convention;\\r\\n\\r\\n    let displayName = '';\\r\\n    switch (convention) {        \\r\\n        case \\\"P\\\":\\r\\n        case \\\"PB\\\":\\r\\n            displayName = displayName + lastNamePartner + ', ' + nickName;\\r\\n            if (typeof middleNamePartner !== 'undefined' && middleNamePartner) { displayName = displayName + ' ' + middleNamePartner  }\\r\\n            displayName = displayName + ' (' + Person.ExternalId + ')';\\r\\n            break;\\r\\n        case \\\"B\\\":\\r\\n        case \\\"BP\\\":\\r\\n        default:\\r\\n            displayName = displayName + lastName + ', ' + nickName;\\r\\n            if (typeof middleName !== 'undefined' && middleName) { displayName = displayName + ' ' + middleName  }\\r\\n            displayName = displayName + ' (' + Person.ExternalId + ')';\\r\\n            break;\\r\\n    }\\r\\n    // Trim spaces at start and end\\r\\n    displayName = displayName.trim();\\r\\n\\r\\n    // Shorten string to maxAttributeLength \\r\\n    const maxAttributeLength = 256;\\r\\n    displayName = displayName.substring(0, maxAttributeLength);\\r\\n\\r\\n    return displayName;\\r\\n}\\r\\n\\r\\ngenerateDisplayName();\"",
           "UsedInNotifications": false,
           "StoreInAccountData": false
         }
