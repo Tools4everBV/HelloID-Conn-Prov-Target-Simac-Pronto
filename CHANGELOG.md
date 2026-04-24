@@ -18,6 +18,7 @@ Some minor adjustments after the first release.
 
 ### Removed
 
+
 ## [1.0.0] - 29-01-2026
 
 This is the first official release of _HelloID-Conn-Prov-Target-Simac-Pronto_. This release is based on template version _2.4_.
