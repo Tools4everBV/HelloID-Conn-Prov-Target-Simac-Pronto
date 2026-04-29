@@ -59,10 +59,10 @@ function Get-AccessToken {
                 password = $actionContext.Configuration.Password
             }
         }
-        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
-
         # Wait 6 seconds in order to prevent error Too Many Requests
         Start-Sleep -Seconds  6
+
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
 
         Write-Output $token.token
     }
