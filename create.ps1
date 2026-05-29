@@ -23,7 +23,8 @@ function Resolve-Simac-ProntoError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -34,11 +35,39 @@ function Resolve-Simac-ProntoError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
             Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
+    }
+}
+
+function Get-AccessToken {
+    [CmdletBinding()]
+    param ()
+    try {
+        $splatTokenParams = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
+            Method  = 'POST'
+            Headers = @{
+                'accept' = 'application/json'
+            }
+            Body    = @{
+                username = $actionContext.Configuration.UserName
+                password = $actionContext.Configuration.Password
+            }
+        }
+        # Wait 6 seconds in order to prevent error Too Many Requests
+        Start-Sleep -Seconds  6
+
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
+
+        Write-Output $token.token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
@@ -47,20 +76,8 @@ try {
     # Initial Assignments
     $outputContext.AccountReference = 'Currently not available'
 
-    # get auth token and set header
-    $splatTokenParams = @{
-        Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
-        Method  = 'POST'
-        Headers = @{
-            'accept' = 'application/json'
-        }
-        Body    = @{
-            username = $actionContext.Configuration.UserName
-            password = $actionContext.Configuration.Password
-        }
-    }
-    $accessToken = (Invoke-RestMethod @splatTokenParams).token
-
+    $accessToken = Get-AccessToken
+    
     $headers = @{
         Authorization  = "Bearer $($accessToken)"
         'content-type' = 'application/json'
@@ -88,10 +105,12 @@ try {
         }
         try {
             $correlatedAccount = @(Invoke-RestMethod @splatGetUserParams)
-        } catch {
+        }
+        catch {
             if ($_.Exception.Response.StatusCode -eq 404) {
                 $correlatedAccount = $null
-            } else {
+            }
+            else {
                 throw $_
             }
         }
@@ -99,9 +118,11 @@ try {
 
     if ($correlatedAccount.Count -eq 0) {
         $action = 'CreateAccount'
-    } elseif ($correlatedAccount.Count -eq 1) {
+    }
+    elseif ($correlatedAccount.Count -eq 1) {
         $action = 'CorrelateAccount'
-    } elseif ($correlatedAccount.Count -gt 1) {
+    }
+    elseif ($correlatedAccount.Count -gt 1) {
         throw "Multiple accounts found for person where $correlationField is: [$correlationValue]"
     }
 
@@ -113,6 +134,9 @@ try {
                 FromTime  = (Get-Date).AddDays(-1).ToString('yyyy-MM-ddT00:00:00')
                 UntilTime = (Get-Date).ToString('yyyy-MM-ddT00:00:00')
             }
+
+            # Only needed for outputcontext
+            $actionContext.Data.PSObject.Properties.Remove("ProntoTag")
 
             $splatCreateParams = @{
                 Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/persons"
@@ -126,8 +150,10 @@ try {
                 $null = Invoke-RestMethod @splatCreateParams
 
                 $outputContext.Data = ($outputContext.Data | Select-Object -Property $outputContext.data.PSObject.Properties.Name)
+                $outputContext.Data.ProntoTag = $personContext.Person.PrimaryContract.Custom.ProntoTag
                 $outputContext.AccountReference = "$($outputContext.Data.Id)"
-            } else {
+            }
+            else {
                 Write-Information '[DryRun] Create and correlate Simac-Pronto account, will be executed during enforcement'
             }
             $auditLogMessage = "Create account was successful. AccountReference is: [$($outputContext.AccountReference)]"
@@ -136,8 +162,8 @@ try {
 
         'CorrelateAccount' {
             Write-Information 'Correlating Simac-Pronto account'
-
             $outputContext.Data = ($correlatedAccount | Select-Object -Property $outputContext.data.PSObject.Properties.Name)
+            $outputContext.Data.ProntoTag = $personContext.Person.PrimaryContract.Custom.ProntoTag
             $outputContext.AccountReference = "$($correlatedAccount.Id)"
             $outputContext.AccountCorrelated = $true
             $auditLogMessage = "Correlated account: [$($outputContext.AccountReference)] on field: [$($correlationField)] with value: [$($correlationValue)]"
@@ -151,7 +177,8 @@ try {
             Message = $auditLogMessage
             IsError = $false
         })
-} catch {
+}
+catch {
     $outputContext.success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
@@ -159,7 +186,8 @@ try {
         $errorObj = Resolve-Simac-ProntoError -ErrorObject $ex
         $auditLogMessage = "Could not create or correlate Simac-Pronto account. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditLogMessage = "Could not create or correlate Simac-Pronto account. Error: $($ex.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }

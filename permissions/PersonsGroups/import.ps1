@@ -23,7 +23,8 @@ function Resolve-Simac-ProntoError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -34,11 +35,39 @@ function Resolve-Simac-ProntoError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
             Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
+    }
+}
+
+function Get-AccessToken {
+    [CmdletBinding()]
+    param ()
+    try {
+        $splatTokenParams = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
+            Method  = 'POST'
+            Headers = @{
+                'accept' = 'application/json'
+            }
+            Body    = @{
+                username = $actionContext.Configuration.UserName
+                password = $actionContext.Configuration.Password
+            }
+        }
+        # Wait 6 seconds in order to prevent error Too Many Requests
+        Start-Sleep -Seconds  6
+
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
+
+        Write-Output $token.token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
@@ -46,19 +75,7 @@ function Resolve-Simac-ProntoError {
 try {
     Write-Information 'Starting Simac-Pronto permission entitlement import'
 
-    # get auth token and set header
-    $splatTokenParams = @{
-        Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
-        Method  = 'POST'
-        Headers = @{
-            'accept' = 'application/json'
-        }
-        Body    = @{
-            username = $actionContext.Configuration.UserName
-            password = $actionContext.Configuration.Password
-        }
-    }
-    $accessToken = (Invoke-RestMethod @splatTokenParams).token
+    $accessToken = Get-AccessToken
 
     $headers = @{
         Authorization  = "Bearer $($accessToken)"
@@ -83,6 +100,9 @@ try {
         $pageNumber++
     } while ($itemsOnPage -eq $response.meta.per_page)
 
+
+    $allRetrievedPermissions = [System.Collections.Generic.List[object]]::new()
+
     $pageNumber = 1
     do {
         $splatImportPermissionParams = @{
@@ -93,57 +113,72 @@ try {
         $response = Invoke-RestMethod @splatImportPermissionParams
 
         if ($response.data) {
-            foreach ($importedPermission in $response.data) {
-                # If condition can maybe be removed in a production environment
-                if ($null -ne $importedPermission.Id) {
-                    $accountReferences = [System.Collections.Generic.List[string]]::new()
-                    foreach ($account in $importedAccounts) {
-                        if ($null -eq $account.id) {
-                            continue
-                        }
-
-                        if ($null -eq ($account.PersonsGroups.id | Measure-Object).count -eq 0) {
-                            continue
-                        }
-
-                        if ($account.PersonsGroups.id -contains $importedPermission.id) {
-                            $accountReferences.Add("$($account.Id)")
-                        }
-                    }
-
-                    $permission = @{
-                        PermissionReference = @{
-                            Reference = "$($importedPermission.id)"
-                        }
-                        Description         = "$($importedPermission.Description)"
-                        DisplayName         = "$($importedPermission.Name)"
-                        AccountReferences   = $null
-                    }
-
-                    # The code below splits a list of permission members into batches of 100
-                    # Each batch is assigned to $permission.AccountReferences and the permission object will be returned to HelloID for each batch
-                    # Ensure batching is based on the number of account references to prevent exceeding the maximum limit of 500 account references per batch
-                    $batchSize = 500
-                    for ($i = 0; $i -lt $accountReferences.Count; $i += $batchSize) {
-                        $permission.AccountReferences = $accountReferences[$i..([Math]::Min($i + $batchSize - 1, $accountReferences.Count - 1))]
-                        Write-Output $permission
-                    }
-                }
+            foreach ($importedPermission in $response.data) {           
+                $allRetrievedPermissions.Add($importedPermission)                
             }
         }
         $itemsOnPage = $response.meta.to - $response.meta.from + 1
         $pageNumber++
     } while ($itemsOnPage -eq $response.meta.per_page)
 
+    $parentPermissions = $allRetrievedPermissions | Group-Object -Property id -AsHashTable
+
+    foreach ($importedPermission in $allRetrievedPermissions) {
+        # If condition can maybe be removed in a production environment
+        if ($null -ne $importedPermission.Id) {
+            $accountReferences = [System.Collections.Generic.List[string]]::new()
+            foreach ($account in $importedAccounts) {
+                if ($null -eq $account.id) {
+                    continue
+                }
+
+                if (($account.PersonsGroups.id | Measure-Object).count -eq 0) {
+                    continue
+                }
+
+                if ($account.PersonsGroups.id -contains $importedPermission.id) {
+                    $accountReferences.Add("$($account.Id)")
+                }
+            }
+
+            $displayName = $importedPermission.Name
+            if ($null -ne $importedPermission.ParentId) {
+                $displayName = "$($parentPermissions[$importedPermission.ParentId].Name) - $($importedPermission.Name)"
+            }
+                
+            $permission = @{
+                PermissionReference = @{
+                    Reference = "$($importedPermission.id)"
+                }
+                #Description         = "$($importedPermission.Name)"
+                Description         = "$displayName"
+                #DisplayName         = "$($importedPermission.Name)"
+                AccountReferences   = $null
+            }
+
+            # The code below splits a list of permission members into batches of 100
+            # Each batch is assigned to $permission.AccountReferences and the permission object will be returned to HelloID for each batch
+            # Ensure batching is based on the number of account references to prevent exceeding the maximum limit of 500 account references per batch
+                    
+            $batchSize = 500
+            for ($i = 0; $i -lt $accountReferences.Count; $i += $batchSize) {
+                $permission.AccountReferences = $accountReferences[$i..([Math]::Min($i + $batchSize - 1, $accountReferences.Count - 1))]
+                Write-Output $permission
+            }
+        }
+    }
+
     Write-Information 'Simac-Pronto permission entitlement import completed'
-} catch {
+}
+catch {
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-Simac-ProntoError -ErrorObject $ex
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
         Write-Error "Could not import Simac-Pronto permission entitlements. Error: $($errorObj.FriendlyMessage)"
-    } else {
+    }
+    else {
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
         Write-Error "Could not import Simac-Pronto permission entitlements. Error: $($ex.Exception.Message)"
     }

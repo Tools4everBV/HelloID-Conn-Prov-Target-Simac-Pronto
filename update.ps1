@@ -23,7 +23,8 @@ function Resolve-Simac-ProntoError {
         }
         if (-not [string]::IsNullOrEmpty($ErrorObject.ErrorDetails.Message)) {
             $httpErrorObj.ErrorDetails = $ErrorObject.ErrorDetails.Message
-        } elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
+        }
+        elseif ($ErrorObject.Exception.GetType().FullName -eq 'System.Net.WebException') {
             if ($null -ne $ErrorObject.Exception.Response) {
                 $streamReaderResponse = [System.IO.StreamReader]::new($ErrorObject.Exception.Response.GetResponseStream()).ReadToEnd()
                 if (-not [string]::IsNullOrEmpty($streamReaderResponse)) {
@@ -34,11 +35,39 @@ function Resolve-Simac-ProntoError {
         try {
             $errorDetailsObject = ($httpErrorObj.ErrorDetails | ConvertFrom-Json)
             $httpErrorObj.FriendlyMessage = $errorDetailsObject.message
-        } catch {
+        }
+        catch {
             $httpErrorObj.FriendlyMessage = $httpErrorObj.ErrorDetails
             Write-Warning $_.Exception.Message
         }
         Write-Output $httpErrorObj
+    }
+}
+
+function Get-AccessToken {
+    [CmdletBinding()]
+    param ()
+    try {
+        $splatTokenParams = @{
+            Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
+            Method  = 'POST'
+            Headers = @{
+                'accept' = 'application/json'
+            }
+            Body    = @{
+                username = $actionContext.Configuration.UserName
+                password = $actionContext.Configuration.Password
+            }
+        }
+        # Wait 6 seconds in order to prevent error Too Many Requests
+        Start-Sleep -Seconds  6
+
+        $token = Invoke-RestMethod @splatTokenParams #-Verbose:$false
+
+        Write-Output $token.token
+    }
+    catch {
+        $PSCmdlet.ThrowTerminatingError($_)
     }
 }
 #endregion
@@ -49,19 +78,7 @@ try {
         throw 'The account reference could not be found'
     }
 
-    # get auth token and set header
-    $splatTokenParams = @{
-        Uri     = "$($actionContext.Configuration.BaseUrl)/api/v1/auth/token"
-        Method  = 'POST'
-        Headers = @{
-            'accept' = 'application/json'
-        }
-        Body    = @{
-            username = $actionContext.Configuration.UserName
-            password = $actionContext.Configuration.Password
-        }
-    }
-    $accessToken = (Invoke-RestMethod @splatTokenParams).token
+    $accessToken = Get-AccessToken
 
     $headers = @{
         Authorization  = "Bearer $($accessToken)"
@@ -77,19 +94,24 @@ try {
     }
     try {
         $correlatedAccount = (Invoke-RestMethod @splatGetUserParams) | Select-Object -First 1
-    } catch {
+    }
+    catch {
         if ($_.Exception.Response.StatusCode -eq 404) {
             $correlatedAccount = $null
-        } else {
+        }
+        else {
             throw $_
         }
     }
 
-    if ($null -ne $correlatedAccount) {
+    if ($null -ne $correlatedAccount) {        
         $outputContext.PreviousData = ($correlatedAccount | Select-Object -Property $outputContext.PreviousData.PSObject.Properties.Name)
 
         # Replace empty strings with $null to ensure proper comparison
         $actionContext.Data.PSObject.Properties.Where({ $_.Value -eq '' }).ForEach({ $_.Value = $null })
+
+        # Only needed for outputcontext
+        $actionContext.Data.PSObject.Properties.Remove("ProntoTag")
 
         # Always compare the account against the current account in target system
         $splatCompareProperties = @{
@@ -99,10 +121,12 @@ try {
         $propertiesChanged = Compare-Object @splatCompareProperties -PassThru | Where-Object { $_.SideIndicator -eq '=>' }
         if ($propertiesChanged) {
             $action = 'UpdateAccount'
-        } else {
+        }
+        else {
             $action = 'NoChanges'
         }
-    } else {
+    }
+    else {
         $action = 'NotFound'
     }
 
@@ -122,7 +146,8 @@ try {
                 Write-Information "Updating Simac-Pronto account with accountReference: [$($actionContext.References.Account)]"
                 $null = Invoke-RestMethod @splatUpdateParams
 
-            } else {
+            }
+            else {
                 Write-Information "[DryRun] Update Simac-Pronto account with accountReference: [$($actionContext.References.Account)], will be executed during enforcement"
             }
 
@@ -152,17 +177,19 @@ try {
                     IsError = $true
                 })
             break
-        }
-    }
-} catch {
-    $outputContext.Success  = $false
+        }        
+    }    
+}
+catch {
+    $outputContext.Success = $false
     $ex = $PSItem
     if ($($ex.Exception.GetType().FullName -eq 'Microsoft.PowerShell.Commands.HttpResponseException') -or
         $($ex.Exception.GetType().FullName -eq 'System.Net.WebException')) {
         $errorObj = Resolve-Simac-ProntoError -ErrorObject $ex
         $auditLogMessage = "Could not update Simac-Pronto account. Error: $($errorObj.FriendlyMessage)"
         Write-Warning "Error at Line '$($errorObj.ScriptLineNumber)': $($errorObj.Line). Error: $($errorObj.ErrorDetails)"
-    } else {
+    }
+    else {
         $auditLogMessage = "Could not update Simac-Pronto account. Error: $($ex.Exception.Message)"
         Write-Warning "Error at Line '$($ex.InvocationInfo.ScriptLineNumber)': $($ex.InvocationInfo.Line). Error: $($ex.Exception.Message)"
     }
